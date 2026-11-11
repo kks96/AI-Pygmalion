@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111113">
+  <title>Luna | Chat</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      color: #fff;
+      --outer: #111113;
+      --panel: #19191c;
+      --field: #303034;
+      --lilac: #ebd6f6;
+      --lilac-deep: #aa8fca;
+      --faint: #b5afb8;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    body { background: var(--outer); }
+    button { font: inherit; cursor: pointer; }
+    button:focus-visible { outline: 2px solid var(--lilac); outline-offset: 3px; }
+
+    /* Same portrait-size chat window as the video version. */
+    .app {
+      isolation: isolate;
+      width: min(100vw, 520px);
+      height: min(100dvh, 980px);
+      margin: 0 auto;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--panel);
+    }
+    .header {
+      flex: 0 0 auto;
+      min-height: 69px;
+      padding: calc(12px + env(safe-area-inset-top, 0px)) 15px 12px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      background: #1e1c22;
+      border-bottom: 1px solid rgba(255,255,255,.075);
+    }
+    .avatar {
+      flex: 0 0 38px;
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: linear-gradient(140deg, var(--lilac), var(--lilac-deep));
+      color: #31273b;
+      font-weight: 800;
+      font-size: 19px;
+      line-height: 1;
+      user-select: none;
+    }
+    .header-text { display: grid; gap: 3px; }
+    .name { font-size: 14px; font-weight: 750; letter-spacing: -.01em; }
+    .description { font-size: 11px; line-height: 1.2; color: #b3aeba; }
+
+    .chat {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      overscroll-behavior: contain;
+      padding: 18px 14px 24px;
+      background: var(--panel);
+      scrollbar-width: thin;
+      scrollbar-color: #48444c transparent;
+    }
+    /* A restrained empty state; no character image or extra scripted speech. */
+    .empty {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      pointer-events: none;
+      color: #a9a0b3;
+      opacity: .65;
+    }
+    .empty-icon {
+      width: 50px;
+      height: 50px;
+      display: grid;
+      place-items: center;
+      border-radius: 17px;
+      border: 1px solid rgba(235,214,246,.25);
+      background: rgba(235,214,246,.055);
+    }
+    .empty-icon svg { width: 27px; height: 27px; }
+    .empty-title { font-size: 13px; font-weight: 650; letter-spacing: .02em; }
+    .chat.started .empty { display: none; }
+
+    .message {
+      display: flex;
+      flex-direction: column;
+      max-width: 89%;
+      gap: 5px;
+      margin: 0 0 17px;
+      animation: enter .2s ease-out both;
+    }
+    .message.bot { align-items: flex-start; margin-right: auto; }
+    .message.user { align-items: flex-end; margin-left: auto; }
+    .who { color: #aaa4af; font-size: 10.5px; font-weight: 650; padding: 0 8px; }
+    .bubble {
+      width: fit-content;
+      max-width: 100%;
+      padding: 11px 13px;
+      font-size: 13.5px;
+      line-height: 1.52;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      box-shadow: 0 2px 8px rgba(0,0,0,.04);
+    }
+    .bot .bubble {
+      background: #303034;
+      border: 1px solid rgba(255,255,255,.075);
+      color: #fff;
+      border-radius: 16px 16px 16px 5px;
+    }
+    .user .bubble {
+      background: #e9d7f2;
+      border: 1px solid rgba(255,255,255,.20);
+      color: #302737;
+      border-radius: 16px 16px 5px 16px;
+    }
+    .typing .bubble {
+      min-width: 58px;
+      display: flex;
+      gap: 5px;
+      align-items: center;
+      height: 39px;
+    }
+    .typing-dot {
+      height: 6px;
+      width: 6px;
+      border-radius: 50%;
+      background: #d2bfe0;
+      opacity: .45;
+      animation: blink 1.05s infinite ease-in-out;
+    }
+    .typing-dot:nth-child(2) { animation-delay: .15s; }
+    .typing-dot:nth-child(3) { animation-delay: .3s; }
+
+    /* Fixed prepared-text composer: cannot grow beyond the screen. */
+    .composer {
+      position: relative;
+      z-index: 2;
+      flex: 0 0 auto;
+      min-width: 0;
+      padding: 12px 11px calc(12px + env(safe-area-inset-bottom, 0px));
+      background: var(--panel);
+      border-top: 1px solid rgba(255,255,255,.075);
+    }
+    .composer-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .field {
+      flex: 1;
+      min-width: 0;
+      max-height: min(120px, 24dvh);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 11px 13px;
+      border-radius: 16px;
+      background: var(--field);
+      border: 1px solid rgba(255,255,255,.11);
+      color: #fff;
+      font-size: 13.5px;
+      line-height: 1.44;
+      overflow-wrap: anywhere;
+      white-space: normal;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.3) transparent;
+    }
+    .next {
+      flex: 0 0 auto;
+      width: 45px;
+      height: 45px;
+      border: 0;
+      border-radius: 50%;
+      background: #f1eff4;
+      color: #222127;
+      display: grid;
+      place-items: center;
+      font-size: 29px;
+      line-height: 1;
+      padding: 0 0 2px 3px;
+      transition: opacity .15s, transform .15s;
+    }
+    .next:not(:disabled):hover { transform: scale(1.05); }
+    .next:disabled { opacity: .38; cursor: default; }
+
+    @keyframes enter {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes blink {
+      0%,60%,100% { opacity: .35; transform: translateY(0); }
+      30% { opacity: 1; transform: translateY(-2px); }
+    }
+    @media (min-width: 700px) {
+      body { display: grid; place-items: center; }
+      .app { border-left: 1px solid rgba(255,255,255,.05); border-right: 1px solid rgba(255,255,255,.05); }
+    }
+    @media (max-width: 699px) {
+      .app { width: 100vw; height: 100dvh; }
+      .composer {
+        padding: 10px max(9px, env(safe-area-inset-right, 0px))
+          calc(10px + env(safe-area-inset-bottom, 0px))
+          max(9px, env(safe-area-inset-left, 0px));
+      }
+      .field { padding: 10px 12px; font-size: 13px; max-height: min(110px, 22dvh); }
+      .next { width: 44px; height: 44px; font-size: 28px; }
+      .bubble { font-size: 13px; }
+    }
+    @media (max-height: 490px) {
+      .header { min-height: 48px; padding-top: 6px; padding-bottom: 6px; }
+      .avatar { width: 31px; height: 31px; flex-basis: 31px; }
+      .composer { padding-top: 7px; padding-bottom: calc(7px + env(safe-area-inset-bottom, 0px)); }
+      .field { max-height: 16dvh; padding: 7px 10px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .message, .typing-dot, .next { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app" aria-label="Chat with Luna">
+    <header class="header">
+      <div class="avatar" aria-hidden="true">L</div>
+      <div class="header-text">
+        <div class="name">Luna</div>
+        <div class="description">Chat assistant</div>
+      </div>
+    </header>
+    <section class="chat" id="chat" aria-label="Chat messages" aria-live="polite" aria-relevant="additions text">
+      <div class="empty" id="empty" aria-hidden="true">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20.5 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.15 0-2.25-.23-3.25-.64L4 21l1.63-4.62A8.5 8.5 0 1 1 20.5 11.5Z" />
+            <path d="M8.5 11.5h7" />
+          </svg>
+        </div>
+        <div class="empty-title">Luna</div>
+      </div>
+    </section>
+    <section class="composer" aria-label="Message composer">
+      <div class="composer-row">
+        <div class="field" id="message" role="textbox" aria-readonly="true" aria-disabled="false" tabindex="0" aria-label="Prepared message"></div>
+        <button class="next" id="next" type="button" aria-label="Send message" title="Send message">▷</button>
+      </div>
+    </section>
+  </main>
+  <script>
+    'use strict';
+
+    // Four scripted exchanges; the last user farewell requires a separate click.
+    const scenes = [
+      {
+        id: "greeting",
+        user: "Hi Luna. I'm Lindenwood.",
+        bot: "Hey Lindenwood, it’s Luna! I hope things are going well. If you're looking for a simple way to take a break, I have a few suggestions you might enjoy."
+      },
+      {
+        id: "hedonic",
+        user: "Thanks, Luna! That sounds nice. What would you recommend?",
+        bot: "For a fun break, what about watching your favorite show or playing a casual game? It's a great way to relax and enjoy yourself."
+      },
+      {
+        id: "utilitarian",
+        user: "That sounds really nice! I like the idea of doing something fun during a break. Any other suggestions?",
+        bot: "For a practical break, try taking a short walk. Studies suggest that walking may help regulate cortisol levels and support cognitive function."
+      },
+      {
+        id: "closing",
+        user: "That's interesting! I didn't realize walking could have those benefits. I'll give it a try!",
+        bot: "Alright! I hope these suggestions help you make the most of your breaks. I'm always here if you need anything else. See you later, Lindenwood!"
+      }
+    ];
+    const farewell = 'Will do. Thanks, Luna. Talk to you later!';
+
+    const chat = document.getElementById('chat');
+    const message = document.getElementById('message');
+    const next = document.getElementById('next');
+    let turn = 0;
+    let state = 'ready'; // ready | responding | farewell_ready | finished
+
+    function notify(eventName, data = {}) {
+      if (window.parent !== window) {
+        window.parent.postMessage({
+          source: 'luna-text-chat',
+          event: eventName,
+          scene: scenes[turn]?.id || 'end',
+          ...data
+        }, '*');
+      }
+    }
+
+    function scrollToLatest() {
+      // Keeping the scroll in the chat region prevents page overflow.
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function addMessage(speaker, text, temporary = false) {
+      chat.classList.add('started');
+      const item = document.createElement('div');
+      item.className = 'message ' + (speaker === 'Luna' ? 'bot' : 'user');
+      const author = document.createElement('span');
+      author.className = 'who';
+      author.textContent = speaker;
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      if (temporary) {
+        item.classList.add('typing');
+        bubble.setAttribute('aria-label', 'Luna is typing');
+        for (let i = 0; i < 3; i++) {
+          const dot = document.createElement('span');
+          dot.className = 'typing-dot';
+          dot.setAttribute('aria-hidden', 'true');
+          bubble.append(dot);
+        }
+      } else {
+        bubble.textContent = text;
+      }
+      item.append(author, bubble);
+      chat.append(item);
+      scrollToLatest();
+      return item;
+    }
+
+    function redraw() {
+      // The last line is a separately prepared message, not an automatic reply.
+      const sendable = state === 'ready' || state === 'farewell_ready';
+      message.textContent = state === 'finished' ? ''
+        : state === 'farewell_ready' ? farewell
+        : scenes[turn].user;
+      message.scrollTop = 0;
+      message.setAttribute('aria-disabled', state === 'finished' ? 'true' : 'false');
+      message.tabIndex = state === 'finished' ? -1 : 0;
+      next.disabled = !sendable;
+      next.setAttribute('aria-label', state === 'responding' ? 'Luna is responding'
+        : state === 'finished' ? 'Conversation ended' : 'Send message');
+    }
+
+    function send() {
+      if (state === 'farewell_ready') {
+        // Only a real button click can send the final Lindenwood message.
+        addMessage('Lindenwood', farewell);
+        state = 'finished';
+        redraw(); // Blank the prepared-text field and disable its button.
+        next.blur();
+        notify('conversation_completed', {completedScenes: scenes.length});
+        return;
+      }
+      if (state !== 'ready') return;
+      const index = turn;
+      const scene = scenes[index];
+      state = 'responding';
+      redraw();
+      addMessage('Lindenwood', scene.user);
+      notify('scene_started', {startedScene: scene.id});
+      const typing = addMessage('Luna', '', true);
+      const delay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 740;
+      window.setTimeout(() => {
+        typing.remove();
+        addMessage('Luna', scene.bot);
+        notify('scene_completed', {completedScene: scene.id});
+        turn = index + 1;
+        state = turn >= scenes.length ? 'farewell_ready' : 'ready';
+        redraw();
+      }, delay);
+    }
+
+    next.addEventListener('click', send);
+    redraw();
+    notify('session_ready');
+  </script>
+</body>
+</html>

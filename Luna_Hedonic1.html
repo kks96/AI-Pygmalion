@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111113">
+  <title>Luna | Chat</title>
+  <style>
+    :root {
+      color-scheme:dark;
+      font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+      color:#fff;
+    }
+    *,*::before,*::after{box-sizing:border-box}
+    html,body{margin:0;width:100%;height:100%;overflow:hidden}
+    body{background:#111113}
+    button{font:inherit;cursor:pointer}
+    button:focus-visible{outline:2px solid white;outline-offset:3px}
+    [hidden]{display:none!important}
+
+    /* Keep portrait footage portrait on a wide computer monitor.
+       The video and composer form one continuous, centered chat window. */
+    .app{
+      isolation:isolate; position:relative; display:flex;flex-direction:column;
+      width:min(100vw,520px,calc((100dvh - 100px) * 0.5625));
+      height:min(100dvh,980px);
+      min-width:0; min-height:0; margin:0 auto;
+      overflow:hidden;background:#19191c;
+    }
+    .video-area{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;background:#17171a}
+    .video-area video{
+      position:absolute;inset:0;display:block;width:100%;height:100%;
+      object-fit:cover;object-position:center center;
+      background:transparent;opacity:0;z-index:1;
+      transition:opacity 180ms ease-out;
+    }
+    .video-area video.front{opacity:1}
+    /* Soft continuation into the chat footer, not a floating subtitle strip. */
+    .video-area::after{
+      content:"";position:absolute;z-index:4;left:0;right:0;bottom:0;
+      height:52px;pointer-events:none;
+      background:linear-gradient(to bottom,transparent,rgba(25,25,28,.34));
+    }
+    .placeholder{position:absolute;inset:0;z-index:0;display:grid;place-items:center;
+      background:linear-gradient(155deg,#3a3242,#1d1b23 70%,#19191c)}
+    .placeholder span{font-size:clamp(28px,7vw,54px);letter-spacing:.18em;color:#e9d5f3}
+
+    .topbar{position:absolute;z-index:6;top:0;left:0;right:0;
+      display:flex;align-items:center;gap:9px;pointer-events:none;
+      padding:calc(env(safe-area-inset-top,0px) + 14px) 14px 12px;
+      background:linear-gradient(to bottom,rgba(0,0,0,.2),transparent)}
+    .avatar{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;
+      background:linear-gradient(140deg,#ebd6f6,#aa8fca);color:#31273b;font-size:18px;font-weight:800}
+    .name{font-size:13px;font-weight:700;text-shadow:0 1px 6px #000}
+
+    .composer{
+      position:relative;z-index:8; flex:0 0 auto;min-width:0;
+      padding:12px 11px calc(12px + env(safe-area-inset-bottom,0px));
+      background:#19191c;
+      /* stays attached to the footage, never floats off the viewport */
+    }
+    .label{margin:0 0 8px 4px;font-size:12px;font-weight:750;opacity:.9}
+    .composer-row{display:flex;align-items:center;gap:9px;min-width:0}
+    .field{
+      flex:1;min-width:0;max-height:min(120px,24dvh);overflow-y:auto;overscroll-behavior:contain;
+      padding:11px 13px;border-radius:16px;background:#303034;
+      border:1px solid rgba(255,255,255,.11);
+      font-size:16px;line-height:1.44;overflow-wrap:anywhere;white-space:normal;
+      scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.3) transparent;
+    }
+    .next{
+      flex:0 0 auto;width:45px;height:45px;border:0;border-radius:50%;
+      background:#f1eff4;color:#222127;display:grid;place-items:center;
+      font-size:29px;line-height:1;padding:0 0 2px 3px;
+      transition:opacity .15s,transform .15s;
+    }
+    .next:not(:disabled):hover{transform:scale(1.05)}
+    .next:disabled{opacity:.38;cursor:default}
+    .notice{font-size:11px;line-height:1.4;color:#ffc6c6;padding:7px 4px 0}
+
+    @media (min-width:700px){
+      body{display:grid;place-items:center}
+      .app{height:min(100dvh,980px)}
+    }
+    @media (max-width:699px){
+      /* Phones are genuinely edge-to-edge, without side padding. */
+      .app{width:100vw;height:100dvh}
+      .composer{padding:10px max(9px,env(safe-area-inset-right,0px))
+        calc(10px + env(safe-area-inset-bottom,0px)) max(9px,env(safe-area-inset-left,0px))}
+      .field{padding:10px 12px;font-size:18px;max-height:min(110px,22dvh)}
+      .next{width:44px;height:44px;font-size:28px}
+    }
+    @media(max-height:490px){
+      .topbar{padding-top:7px}
+      .composer{padding-top:7px;padding-bottom:calc(7px + env(safe-area-inset-bottom,0px))}
+      .label{margin-bottom:4px}
+      .field{max-height:16dvh;padding:7px 10px}
+    }
+    @media(prefers-reduced-motion:reduce){.video-area video,.next{transition:none!important}}
+  </style>
+</head>
+<body>
+<main class="app" id="app" aria-label="Chat with Luna">
+  <div class="video-area" aria-label="Luna's video replies">
+    <div class="placeholder" aria-hidden="true"><span>LUNA</span></div>
+    <!-- Two permanent video layers allow the old frame to stay on screen while the next clip starts. -->
+    <video id="videoA" class="front" playsinline webkit-playsinline preload="auto" aria-label="Luna's video"></video>
+    <video id="videoB" playsinline webkit-playsinline preload="auto" aria-label="Luna's next video"></video>
+  </div>
+  <header class="topbar"><div class="avatar" aria-hidden="true">L</div><div class="name">Luna</div></header>
+  <section class="composer" id="composer" aria-label="Message composer">
+    <div class="label">Lindenwood</div>
+    <div class="composer-row">
+      <div class="field" id="message" role="textbox" aria-readonly="true" tabindex="0" aria-label="Prepared message"></div>
+      <button class="next" id="next" type="button" aria-label="Send message" title="Send message">▷</button>
+    </div>
+    <div class="notice" id="notice" role="alert" hidden></div>
+  </section>
+</main>
+<script>
+  'use strict';
+
+  // Place this HTML file next to the videos/ folder, or edit the four relative paths below.
+  const scenes = [
+    { id:'greeting', video:'videos/01_greeting.mp4',
+      user:"Hi Luna. I'm Lindenwood." },
+    { id:'hedonic', video:'videos/02_hedonic.mp4',
+      user:'Thanks, Luna! That sounds nice. What would you recommend?' },
+    { id:'utilitarian', video:'videos/03_utilitarian.mp4',
+      user:'That sounds really nice! I like the idea of doing something fun during a break. Any other suggestions?' },
+    { id:'closing', video:'videos/04_closing.mp4',
+      user:"That's interesting! I didn't realize walking could have those benefits. I'll give it a try!" }
+  ];
+  const farewell = 'Will do. Thanks, Luna. Talk to you later!';
+  const elements = {
+    app:document.getElementById('app'),
+    composer:document.getElementById('composer'),
+    message:document.getElementById('message'),
+    next:document.getElementById('next'),
+    notice:document.getElementById('notice')
+  };
+  const videos = [document.getElementById('videoA'), document.getElementById('videoB')];
+  let front = videos[0];       // Video currently visible (also when paused at the last frame).
+  let standby = videos[1];     // Next clip loads here while the current frame stays visible.
+  let turn = 0;                // Next scene to play.
+  let state = 'ready';         // ready | playing | error | finished
+  let currentVideo = null;
+  let playbackToken = 0;
+  let swapTimer = null;
+
+  function notify(name, data = {}) {
+    // Hook for Qualtrics or an external survey container. No participant answers are sent.
+    if (window.parent !== window) window.parent.postMessage({source:'luna-video-chat',event:name,scene:scenes[turn]?.id || 'end',...data},'*');
+  }
+  function setSource(video, index) {
+    if (index >= scenes.length) {video.dataset.scene = ''; video.removeAttribute('src'); return;}
+    if (video.dataset.scene === String(index)) return;
+    video.pause();
+    video.dataset.scene = String(index);
+    video.src = scenes[index].video;
+    video.preload = 'auto';
+    video.load();
+  }
+  function redraw() {
+    elements.message.textContent = state === 'finished' ? farewell : scenes[turn].user;
+    elements.message.scrollTop = 0;
+    elements.next.disabled = state === 'playing' || state === 'finished';
+    elements.next.textContent = '▷';
+    elements.next.setAttribute('aria-label',state === 'finished' ? 'No further messages' : state === 'playing' ? 'Luna is speaking' : state === 'error' ? 'Retry message' : 'Send message');
+  }
+  function failVideo(video, token) {
+    if (state !== 'playing' || currentVideo !== video || token !== playbackToken) return;
+    state = 'error';
+    video.pause();
+    // Do not hide the preceding frame on errors.
+    if (video !== front) {video.classList.remove('front');video.style.zIndex='1';}
+    elements.notice.textContent = 'Video unavailable. Check the MP4 file and tap ▷ to retry.';
+    elements.notice.hidden = false;
+    redraw();
+    notify('video_error',{failedScene:scenes[turn].id});
+  }
+
+  // Display an incoming clip only after its first decoded frame: no black flash.
+  function showWhenReady(video, token) {
+    if (video === front) return; // Scene 1 already shows its first frame.
+    let revealed = false;
+    const reveal = () => {
+      if (revealed || token !== playbackToken || state !== 'playing' || currentVideo !== video) return;
+      if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+      revealed = true;
+      const outgoing = front;
+      video.style.zIndex = '3';
+      outgoing.style.zIndex = '2';
+      video.classList.add('front');
+      // Keep outgoing last frame underneath throughout the fade.
+      clearTimeout(swapTimer);
+      swapTimer = setTimeout(() => {
+        if (token !== playbackToken) return;
+        outgoing.classList.remove('front');
+        outgoing.style.zIndex = '1';
+        front = video;
+        standby = outgoing;
+        if (turn+1 < scenes.length) setSource(standby,turn+1);
+      }, 230);
+    };
+    if ('requestVideoFrameCallback' in video) {
+      video.requestVideoFrameCallback(() => reveal());
+    } else {
+      // Older browsers: playing + two animation frames allows the decoded frame to paint.
+      video.addEventListener('playing',function onPlaying(){
+        video.removeEventListener('playing',onPlaying);
+        requestAnimationFrame(() => requestAnimationFrame(reveal));
+      },{once:true});
+    }
+  }
+
+  function startTurn() {
+    if (state !== 'ready' && state !== 'error') return;
+    const index = turn;
+    const video = front.dataset.scene === String(index) ? front : standby;
+    if (video.dataset.scene !== String(index)) setSource(video,index);
+    state='playing';
+    currentVideo=video;
+    elements.notice.hidden=true;
+    redraw();
+    const token=++playbackToken;
+    showWhenReady(video,token);
+    notify('scene_started',{startedScene:scenes[index].id});
+    // Called in a real button-click handler, allowing unmuted playback on mobile.
+    const result=video.play();
+    if (result && typeof result.catch === 'function') {
+      result.catch(e => {
+        if (e?.name === 'AbortError' && token !== playbackToken) return;
+        failVideo(video,token);
+      });
+    }
+  }
+
+  function onEnded(video) {
+    if (state !== 'playing' || currentVideo !== video) return;
+    notify('scene_completed',{completedScene:scenes[turn].id});
+    turn += 1;
+    currentVideo=null;
+    if (turn >= scenes.length) {
+      state='finished';
+      // Only the predefined farewell is shown; no 'complete' screen or button.
+      notify('conversation_completed',{completedScenes:scenes.length});
+    } else {
+      state='ready';
+    }
+    redraw();
+  }
+
+  elements.next.addEventListener('click',startTurn);
+  for (const v of videos) {
+    v.addEventListener('ended',() => onEnded(v));
+    v.addEventListener('error',() => { if (v === currentVideo) failVideo(v,playbackToken); });
+  }
+  // Start decoding scene 1 immediately, then scene 2 in a hidden layer.
+  setSource(front,0);
+  setSource(standby,1);
+  redraw();
+  notify('session_ready');
+</script>
+</body>
+</html>
